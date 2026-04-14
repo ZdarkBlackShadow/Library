@@ -1,71 +1,203 @@
 using Library.Core.Services;
+using Library.UI.Helpers;
 
 namespace Library.UI;
 
 public partial class Form1 : Form
 {
     private readonly UserService _userService = new();
-    
-    // Éléments d'interface
-    private TextBox txtUsername = null!;
-    private TextBox txtPassword = null!;
-    private Button btnLogin = null!;
-    private Button btnRegister = null!;
+
+    private TextBox _txtUsername = null!;
+    private TextBox _txtPassword = null!;
+    private Label _lblError = null!;
+    private Button _btnLogin = null!;
+    private Button _btnRegister = null!;
+
+    public int LoggedInUserId { get; private set; }
 
     public Form1()
     {
-        InitializeCustomComponents();
+        InitializeComponent();
+        BuildUI();
     }
 
-    private void InitializeCustomComponents()
+    private void BuildUI()
     {
-        this.Text = "Rat de Bibliothèque - Connexion";
-        this.Size = new Size(300, 250);
-        this.StartPosition = FormStartPosition.CenterScreen;
+        this.Text = "Rat de Bibliotheque";
+        this.Size = new Size(440, 500);
+        this.FormBorderStyle = FormBorderStyle.FixedDialog;
+        this.MaximizeBox = false;
+        UIHelper.StyleForm(this);
 
-        var lblUser = new Label { Text = "Utilisateur:", Location = new Point(20, 20), AutoSize = true };
-        txtUsername = new TextBox { Location = new Point(20, 40), Width = 240 };
+        // ── Left accent bar ──
+        var accentBar = new Panel
+        {
+            Dock = DockStyle.Left,
+            Width = 6,
+            BackColor = UIHelper.Primary
+        };
 
-        var lblPass = new Label { Text = "Mot de passe:", Location = new Point(20, 80), AutoSize = true };
-        txtPassword = new TextBox { Location = new Point(20, 100), Width = 240, PasswordChar = '●' };
+        // ── Center card ──
+        var card = new Panel
+        {
+            Size = new Size(380, 420),
+            Location = new Point(30, 20),
+            BackColor = UIHelper.CardBg
+        };
+        UIHelper.StyleCard(card);
 
-        btnLogin = new Button { Text = "Se connecter", Location = new Point(20, 150), Width = 110 };
-        btnRegister = new Button { Text = "S'inscrire", Location = new Point(150, 150), Width = 110 };
+        // ── App icon area ──
+        var lblIcon = new Label
+        {
+            Text = "[ ]",
+            Font = new Font("Segoe UI", 28, FontStyle.Bold),
+            ForeColor = UIHelper.Primary,
+            Location = new Point(140, 10),
+            AutoSize = true
+        };
 
-        btnLogin.Click += OnLoginClick;
-        btnRegister.Click += OnRegisterClick;
+        var lblAppName = new Label
+        {
+            Text = "Rat de Bibliotheque",
+            Location = new Point(80, 70),
+            AutoSize = true
+        };
+        UIHelper.StyleTitleLabel(lblAppName);
+        lblAppName.ForeColor = UIHelper.TextPrimary;
 
-        this.Controls.AddRange(new Control[] { lblUser, txtUsername, lblPass, txtPassword, btnLogin, btnRegister });
+        var lblSubtitle = new Label
+        {
+            Text = "Connectez-vous pour continuer",
+            Location = new Point(98, 100),
+            AutoSize = true
+        };
+        UIHelper.StyleSubtitleLabel(lblSubtitle);
+
+        // ── Fields ──
+        var (lblUser, txtUser) = UIHelper.CreateField("Nom d'utilisateur", 140, fieldWidth: 340);
+        _txtUsername = txtUser;
+
+        var (lblPass, txtPass) = UIHelper.CreateField("Mot de passe", 200, fieldWidth: 340);
+        _txtPassword = txtPass;
+        _txtPassword.PasswordChar = '\u25CF';
+
+        // ── Error label ──
+        _lblError = new Label
+        {
+            Text = "",
+            Location = new Point(20, 258),
+            Size = new Size(340, 20),
+            ForeColor = UIHelper.Danger,
+            Font = UIHelper.FontSmall,
+            Visible = false
+        };
+
+        // ── Buttons ──
+        _btnLogin = new Button
+        {
+            Text = "Se connecter",
+            Location = new Point(20, 282),
+            Width = 340,
+            Height = 42
+        };
+        UIHelper.StylePrimaryButton(_btnLogin);
+        _btnLogin.Font = UIHelper.FontBold;
+        _btnLogin.Click += OnLoginClick;
+
+        _btnRegister = new Button
+        {
+            Text = "Creer un compte",
+            Location = new Point(20, 334),
+            Width = 340,
+            Height = 42
+        };
+        UIHelper.StyleSecondaryButton(_btnRegister);
+        _btnRegister.Click += OnRegisterClick;
+
+        card.Controls.AddRange(new Control[]
+        {
+            lblIcon, lblAppName, lblSubtitle,
+            lblUser, _txtUsername,
+            lblPass, _txtPassword,
+            _lblError,
+            _btnLogin, _btnRegister
+        });
+
+        this.Controls.Add(card);
+        this.Controls.Add(accentBar);
+
+        this.AcceptButton = _btnLogin;
     }
 
     private void OnLoginClick(object? sender, EventArgs e)
     {
-        if (_userService.Login(txtUsername.Text, txtPassword.Text))
+        _lblError.Visible = false;
+
+        if (string.IsNullOrWhiteSpace(_txtUsername.Text) || string.IsNullOrWhiteSpace(_txtPassword.Text))
         {
-            this.Hide();
-            
-            var mainForm = new MainForm();
-            mainForm.ShowDialog();
-            
-            this.Close();
+            ShowError("Veuillez remplir tous les champs.");
+            return;
         }
-        else
+
+        try
         {
-            MessageBox.Show("Identifiants incorrects.", "Erreur", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            if (_userService.Login(_txtUsername.Text.Trim(), _txtPassword.Text))
+            {
+                this.Hide();
+                var mainForm = new MainForm();
+                mainForm.ShowDialog();
+                this.Close();
+            }
+            else
+            {
+                ShowError("Identifiants incorrects.");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Erreur de connexion : {ex.Message}");
         }
     }
 
     private void OnRegisterClick(object? sender, EventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(txtUsername.Text) || string.IsNullOrWhiteSpace(txtPassword.Text)) return;
+        _lblError.Visible = false;
 
-        if (_userService.Register(txtUsername.Text, txtPassword.Text))
+        if (string.IsNullOrWhiteSpace(_txtUsername.Text) || string.IsNullOrWhiteSpace(_txtPassword.Text))
         {
-            MessageBox.Show("Compte créé avec succès ! Vous pouvez vous connecter.", "Succès");
+            ShowError("Veuillez remplir tous les champs.");
+            return;
         }
-        else
+
+        if (_txtPassword.Text.Length < 4)
         {
-            MessageBox.Show("Erreur lors de l'inscription.", "Erreur");
+            ShowError("Le mot de passe doit contenir au moins 4 caracteres.");
+            return;
         }
+
+        try
+        {
+            if (_userService.Register(_txtUsername.Text.Trim(), _txtPassword.Text))
+            {
+                _lblError.ForeColor = UIHelper.Success;
+                _lblError.Text = "Compte cree ! Vous pouvez vous connecter.";
+                _lblError.Visible = true;
+            }
+            else
+            {
+                ShowError("Ce nom d'utilisateur existe deja.");
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Erreur : {ex.Message}");
+        }
+    }
+
+    private void ShowError(string message)
+    {
+        _lblError.ForeColor = UIHelper.Danger;
+        _lblError.Text = message;
+        _lblError.Visible = true;
     }
 }
