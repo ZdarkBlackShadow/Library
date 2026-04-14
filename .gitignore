@@ -1,20 +1,40 @@
+# Build output
 [Bb]in/
 [Oo]bj/
 [Oo]ut/
+publish/
 
+# IDE
 .vscode/
 .idea/
+.vs/
 *.user
 *.userosscache
+*.suo
 *.sln.docstates
+*.slnx.user
 
-
-*.log
-.DS_Store
-Thumbs.db
-
+# NuGet
+packages/
+*.nupkg
 project.lock.json
 project.fragment.lock.json
 *.nuget.props
 *.nuget.targets
-.vs/
+
+# Test results
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db
+
+# Local environment / secrets
+.env
+.env.local
+appsettings.local.json
+docker-compose.override.yml
