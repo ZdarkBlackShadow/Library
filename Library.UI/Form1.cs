@@ -13,8 +13,6 @@ public partial class Form1 : Form
     private Button _btnLogin = null!;
     private Button _btnRegister = null!;
 
-    public int LoggedInUserId { get; private set; }
-
     public Form1()
     {
         InitializeComponent();
@@ -29,7 +27,6 @@ public partial class Form1 : Form
         this.MaximizeBox = false;
         UIHelper.StyleForm(this);
 
-        // ── Left accent bar ──
         var accentBar = new Panel
         {
             Dock = DockStyle.Left,
@@ -37,7 +34,6 @@ public partial class Form1 : Form
             BackColor = UIHelper.Primary
         };
 
-        // ── Center card ──
         var card = new Panel
         {
             Size = new Size(380, 420),
@@ -46,7 +42,6 @@ public partial class Form1 : Form
         };
         UIHelper.StyleCard(card);
 
-        // ── App icon area ──
         var lblIcon = new Label
         {
             Text = "[ ]",
@@ -73,7 +68,6 @@ public partial class Form1 : Form
         };
         UIHelper.StyleSubtitleLabel(lblSubtitle);
 
-        // ── Fields ──
         var (lblUser, txtUser) = UIHelper.CreateField("Nom d'utilisateur", 140, fieldWidth: 340);
         _txtUsername = txtUser;
 
@@ -81,7 +75,6 @@ public partial class Form1 : Form
         _txtPassword = txtPass;
         _txtPassword.PasswordChar = '\u25CF';
 
-        // ── Error label ──
         _lblError = new Label
         {
             Text = "",
@@ -92,7 +85,6 @@ public partial class Form1 : Form
             Visible = false
         };
 
-        // ── Buttons ──
         _btnLogin = new Button
         {
             Text = "Se connecter",
@@ -129,7 +121,7 @@ public partial class Form1 : Form
         this.AcceptButton = _btnLogin;
     }
 
-    private void OnLoginClick(object? sender, EventArgs e)
+    private async void OnLoginClick(object? sender, EventArgs e)
     {
         _lblError.Visible = false;
 
@@ -139,13 +131,20 @@ public partial class Form1 : Form
             return;
         }
 
+        // Disable buttons to prevent double-submit during the async Argon2 computation
+        _btnLogin.Enabled = false;
+        _btnRegister.Enabled = false;
+
         try
         {
-            if (_userService.Login(_txtUsername.Text.Trim(), _txtPassword.Text))
+            var (success, userId) = await _userService.Login(
+                _txtUsername.Text.Trim(), _txtPassword.Text);
+
+            if (success)
             {
                 this.Hide();
-                var mainForm = new MainForm();
-                mainForm.ShowDialog();
+                var mainForm = new MainForm(userId);
+                mainForm.ShowDialog(this);
                 this.Close();
             }
             else
@@ -157,9 +156,14 @@ public partial class Form1 : Form
         {
             ShowError($"Erreur de connexion : {ex.Message}");
         }
+        finally
+        {
+            _btnLogin.Enabled = true;
+            _btnRegister.Enabled = true;
+        }
     }
 
-    private void OnRegisterClick(object? sender, EventArgs e)
+    private async void OnRegisterClick(object? sender, EventArgs e)
     {
         _lblError.Visible = false;
 
@@ -175,9 +179,12 @@ public partial class Form1 : Form
             return;
         }
 
+        _btnLogin.Enabled = false;
+        _btnRegister.Enabled = false;
+
         try
         {
-            if (_userService.Register(_txtUsername.Text.Trim(), _txtPassword.Text))
+            if (await _userService.Register(_txtUsername.Text.Trim(), _txtPassword.Text))
             {
                 _lblError.ForeColor = UIHelper.Success;
                 _lblError.Text = "Compte cree ! Vous pouvez vous connecter.";
@@ -191,6 +198,11 @@ public partial class Form1 : Form
         catch (Exception ex)
         {
             ShowError($"Erreur : {ex.Message}");
+        }
+        finally
+        {
+            _btnLogin.Enabled = true;
+            _btnRegister.Enabled = true;
         }
     }
 

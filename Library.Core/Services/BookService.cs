@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Library.Core.Data;
 using Library.Core.Models;
 using MySql.Data.MySqlClient;
@@ -8,86 +9,89 @@ public class BookService
 {
     private readonly DatabaseContext _db = new();
 
-    public bool AddBook(string title, string author, string genre, string isbn, string location)
+    public async Task<bool> AddBook(string title, string author, string? genre, string? isbn,
+        int? publicationYear, string rayon, string etagere)
     {
         using var conn = _db.CreateConnection();
-        conn.Open();
-        var query = "INSERT INTO books (title, author, genre, isbn, location_description) VALUES (@title, @author, @genre, @isbn, @loc)";
+        await conn.OpenAsync();
+        const string query =
+            "INSERT INTO books (title, author, genre, isbn, publication_year, rayon, etagere) " +
+            "VALUES (@title, @author, @genre, @isbn, @year, @rayon, @etagere)";
         using var cmd = new MySqlCommand(query, conn);
         cmd.Parameters.AddWithValue("@title", title);
         cmd.Parameters.AddWithValue("@author", author);
-        cmd.Parameters.AddWithValue("@genre", string.IsNullOrWhiteSpace(genre) ? DBNull.Value : genre);
-        cmd.Parameters.AddWithValue("@isbn", string.IsNullOrWhiteSpace(isbn) ? DBNull.Value : isbn);
-        cmd.Parameters.AddWithValue("@loc", location);
-
-        return cmd.ExecuteNonQuery() > 0;
+        cmd.Parameters.AddWithValue("@genre", string.IsNullOrWhiteSpace(genre) ? DBNull.Value : (object)genre);
+        cmd.Parameters.AddWithValue("@isbn", string.IsNullOrWhiteSpace(isbn) ? DBNull.Value : (object)isbn);
+        cmd.Parameters.AddWithValue("@year", publicationYear.HasValue ? (object)publicationYear.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@rayon", rayon);
+        cmd.Parameters.AddWithValue("@etagere", etagere);
+        return await cmd.ExecuteNonQueryAsync() > 0;
     }
 
-    public bool UpdateBook(int id, string title, string author, string genre, string isbn, string location)
+    public async Task<bool> UpdateBook(int id, string title, string author, string? genre, string? isbn,
+        int? publicationYear, string rayon, string etagere)
     {
         using var conn = _db.CreateConnection();
-        conn.Open();
-        var query = "UPDATE books SET title = @title, author = @author, genre = @genre, isbn = @isbn, location_description = @loc WHERE id = @id";
+        await conn.OpenAsync();
+        const string query =
+            "UPDATE books SET title=@title, author=@author, genre=@genre, isbn=@isbn, " +
+            "publication_year=@year, rayon=@rayon, etagere=@etagere WHERE id=@id";
         using var cmd = new MySqlCommand(query, conn);
         cmd.Parameters.AddWithValue("@id", id);
         cmd.Parameters.AddWithValue("@title", title);
         cmd.Parameters.AddWithValue("@author", author);
-        cmd.Parameters.AddWithValue("@genre", string.IsNullOrWhiteSpace(genre) ? DBNull.Value : genre);
-        cmd.Parameters.AddWithValue("@isbn", string.IsNullOrWhiteSpace(isbn) ? DBNull.Value : isbn);
-        cmd.Parameters.AddWithValue("@loc", location);
-
-        return cmd.ExecuteNonQuery() > 0;
+        cmd.Parameters.AddWithValue("@genre", string.IsNullOrWhiteSpace(genre) ? DBNull.Value : (object)genre);
+        cmd.Parameters.AddWithValue("@isbn", string.IsNullOrWhiteSpace(isbn) ? DBNull.Value : (object)isbn);
+        cmd.Parameters.AddWithValue("@year", publicationYear.HasValue ? (object)publicationYear.Value : DBNull.Value);
+        cmd.Parameters.AddWithValue("@rayon", rayon);
+        cmd.Parameters.AddWithValue("@etagere", etagere);
+        return await cmd.ExecuteNonQueryAsync() > 0;
     }
 
-    public bool DeleteBook(int id)
+    public async Task<bool> DeleteBook(int id)
     {
         using var conn = _db.CreateConnection();
-        conn.Open();
-        var query = "DELETE FROM books WHERE id = @id";
+        await conn.OpenAsync();
+        const string query = "DELETE FROM books WHERE id = @id";
         using var cmd = new MySqlCommand(query, conn);
         cmd.Parameters.AddWithValue("@id", id);
-
-        return cmd.ExecuteNonQuery() > 0;
+        return await cmd.ExecuteNonQueryAsync() > 0;
     }
 
-    public Book? GetBookById(int id)
+    public async Task<Book?> GetBookById(int id)
     {
         using var conn = _db.CreateConnection();
-        conn.Open();
-        var query = "SELECT * FROM books WHERE id = @id";
+        await conn.OpenAsync();
+        const string query = "SELECT * FROM books WHERE id = @id";
         using var cmd = new MySqlCommand(query, conn);
         cmd.Parameters.AddWithValue("@id", id);
-        using var reader = cmd.ExecuteReader();
-
-        if (reader.Read())
+        using var reader = await cmd.ExecuteReaderAsync();
+        if (await reader.ReadAsync())
             return ReadBook(reader);
-
         return null;
     }
 
-    public List<Book> GetAllBooks()
+    public async Task<List<Book>> GetAllBooks()
     {
         var list = new List<Book>();
         using var conn = _db.CreateConnection();
-        conn.Open();
-        var query = "SELECT * FROM books";
+        await conn.OpenAsync();
+        const string query = "SELECT * FROM books ORDER BY title";
         using var cmd = new MySqlCommand(query, conn);
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
             list.Add(ReadBook(reader));
-        }
         return list;
     }
 
-    public List<Book> SearchBooks(string? title, string? author, string? genre, string? isbn)
+    public async Task<List<Book>> SearchBooks(string? title, string? author, string? genre, string? isbn)
     {
         var list = new List<Book>();
         var conditions = new List<string>();
-        using var conn = _db.CreateConnection();
-        conn.Open();
 
-        var query = "SELECT * FROM books";
+        using var conn = _db.CreateConnection();
+        await conn.OpenAsync();
+
         using var cmd = new MySqlCommand();
         cmd.Connection = conn;
 
@@ -112,29 +116,35 @@ public class BookService
             cmd.Parameters.AddWithValue("@isbn", $"%{isbn}%");
         }
 
+        string query = "SELECT * FROM books";
         if (conditions.Count > 0)
             query += " WHERE " + string.Join(" AND ", conditions);
+        query += " ORDER BY title";
 
         cmd.CommandText = query;
-        using var reader = cmd.ExecuteReader();
-        while (reader.Read())
-        {
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
             list.Add(ReadBook(reader));
-        }
         return list;
     }
 
-    private static Book ReadBook(MySqlDataReader reader)
+    private static Book ReadBook(DbDataReader reader)
     {
+        int yearOrdinal = reader.GetOrdinal("publication_year");
         return new Book
         {
-            Id = reader.GetInt32("id"),
-            Title = reader.GetString("title"),
-            Author = reader.GetString("author"),
-            Genre = reader.IsDBNull(reader.GetOrdinal("genre")) ? null : reader.GetString("genre"),
-            ISBN = reader.IsDBNull(reader.GetOrdinal("isbn")) ? null : reader.GetString("isbn"),
-            Location = reader.GetString("location_description"),
-            IsAvailable = reader.GetBoolean("is_available")
+            Id = reader.GetInt32(reader.GetOrdinal("id")),
+            Title = reader.GetString(reader.GetOrdinal("title")),
+            Author = reader.GetString(reader.GetOrdinal("author")),
+            Genre = reader.IsDBNull(reader.GetOrdinal("genre"))
+                ? null : reader.GetString(reader.GetOrdinal("genre")),
+            ISBN = reader.IsDBNull(reader.GetOrdinal("isbn"))
+                ? null : reader.GetString(reader.GetOrdinal("isbn")),
+            PublicationYear = reader.IsDBNull(yearOrdinal)
+                ? null : reader.GetInt32(yearOrdinal),
+            Rayon = reader.GetString(reader.GetOrdinal("rayon")),
+            Etagere = reader.GetString(reader.GetOrdinal("etagere")),
+            IsAvailable = reader.GetBoolean(reader.GetOrdinal("is_available"))
         };
     }
 }

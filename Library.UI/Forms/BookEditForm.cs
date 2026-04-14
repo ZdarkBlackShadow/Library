@@ -9,13 +9,24 @@ public class BookEditForm : Form
     private TextBox _txtAuthor = null!;
     private TextBox _txtGenre = null!;
     private TextBox _txtIsbn = null!;
-    private TextBox _txtLocation = null!;
+    private TextBox _txtPublicationYear = null!;
+    private TextBox _txtRayon = null!;
+    private TextBox _txtEtagere = null!;
 
     public string BookTitle => _txtTitle.Text.Trim();
     public string BookAuthor => _txtAuthor.Text.Trim();
     public string BookGenre => _txtGenre.Text.Trim();
     public string BookIsbn => _txtIsbn.Text.Trim();
-    public string BookLocation => _txtLocation.Text.Trim();
+    public int? BookPublicationYear
+    {
+        get
+        {
+            string raw = _txtPublicationYear.Text.Trim();
+            return int.TryParse(raw, out int y) && y >= 1000 && y <= 2100 ? y : null;
+        }
+    }
+    public string BookRayon => _txtRayon.Text.Trim();
+    public string BookEtagere => _txtEtagere.Text.Trim();
 
     private readonly Book? _existingBook;
 
@@ -30,14 +41,16 @@ public class BookEditForm : Form
             _txtAuthor.Text = _existingBook.Author;
             _txtGenre.Text = _existingBook.Genre ?? "";
             _txtIsbn.Text = _existingBook.ISBN ?? "";
-            _txtLocation.Text = _existingBook.Location;
+            _txtPublicationYear.Text = _existingBook.PublicationYear?.ToString() ?? "";
+            _txtRayon.Text = _existingBook.Rayon;
+            _txtEtagere.Text = _existingBook.Etagere;
         }
     }
 
     private void InitializeUI()
     {
         this.Text = _existingBook == null ? "Ajouter un livre" : "Modifier le livre";
-        this.Size = new Size(420, 420);
+        this.Size = new Size(440, 510);
         this.FormBorderStyle = FormBorderStyle.FixedDialog;
         this.MaximizeBox = false;
         this.MinimizeBox = false;
@@ -53,26 +66,43 @@ public class BookEditForm : Form
         };
         UIHelper.StyleTitleLabel(title);
 
-        var (lblTitle, txtTitle) = UIHelper.CreateField("Titre *", 56);
+        // Row 1 — Titre
+        var (lblTitle, txtTitle) = UIHelper.CreateField("Titre *", 56, fieldWidth: 380);
         _txtTitle = txtTitle;
 
-        var (lblAuthor, txtAuthor) = UIHelper.CreateField("Auteur *", 110);
+        // Row 2 — Auteur
+        var (lblAuthor, txtAuthor) = UIHelper.CreateField("Auteur *", 110, fieldWidth: 380);
         _txtAuthor = txtAuthor;
 
+        // Row 3 — Genre (half) + ISBN (half)
         var (lblGenre, txtGenre) = UIHelper.CreateField("Genre", 164, fieldWidth: 140);
         _txtGenre = txtGenre;
 
         var (lblIsbn, txtIsbn) = UIHelper.CreateField("ISBN", 164, labelX: 180, fieldX: 180, fieldWidth: 140);
         _txtIsbn = txtIsbn;
 
-        var (lblLocation, txtLocation) = UIHelper.CreateField("Emplacement *", 218);
-        _txtLocation = txtLocation;
+        // Row 4 — Année de publication (short)
+        var (lblYear, txtYear) = UIHelper.CreateField("Année de publication", 218, fieldWidth: 90);
+        _txtPublicationYear = txtYear;
+        _txtPublicationYear.PlaceholderText = "Ex : 1984";
+        _txtPublicationYear.MaxLength = 4;
 
+        // Row 5 — Rayon
+        var (lblRayon, txtRayon) = UIHelper.CreateField("Rayon *", 272, fieldWidth: 380);
+        _txtRayon = txtRayon;
+        _txtRayon.PlaceholderText = "Ex : Salon, Science-Fiction...";
+
+        // Row 6 — Étagère
+        var (lblEtagere, txtEtagere) = UIHelper.CreateField("Étagère *", 326, fieldWidth: 380);
+        _txtEtagere = txtEtagere;
+        _txtEtagere.PlaceholderText = "Ex : Étagère A1, Meuble Haut...";
+
+        // Buttons
         var btnSave = new Button
         {
             Text = _existingBook == null ? "Ajouter" : "Enregistrer",
-            Location = new Point(20, 290),
-            Width = 140,
+            Location = new Point(20, 390),
+            Width = 160,
             Height = 40
         };
         UIHelper.StyleSuccessButton(btnSave);
@@ -81,7 +111,7 @@ public class BookEditForm : Form
         var btnCancel = new Button
         {
             Text = "Annuler",
-            Location = new Point(180, 290),
+            Location = new Point(200, 390),
             Width = 140,
             Height = 40
         };
@@ -95,7 +125,9 @@ public class BookEditForm : Form
             lblAuthor, _txtAuthor,
             lblGenre, _txtGenre,
             lblIsbn, _txtIsbn,
-            lblLocation, _txtLocation,
+            lblYear, _txtPublicationYear,
+            lblRayon, _txtRayon,
+            lblEtagere, _txtEtagere,
             btnSave, btnCancel
         });
 
@@ -116,10 +148,28 @@ public class BookEditForm : Form
             _txtAuthor.Focus();
             return;
         }
-        if (string.IsNullOrWhiteSpace(_txtLocation.Text))
+
+        string rawYear = _txtPublicationYear.Text.Trim();
+        if (!string.IsNullOrEmpty(rawYear))
         {
-            ShowError("L'emplacement est obligatoire.");
-            _txtLocation.Focus();
+            if (!int.TryParse(rawYear, out int y) || y < 1000 || y > 2100)
+            {
+                ShowError("L'année de publication doit être un nombre entre 1000 et 2100.");
+                _txtPublicationYear.Focus();
+                return;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(_txtRayon.Text))
+        {
+            ShowError("Le rayon est obligatoire.");
+            _txtRayon.Focus();
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_txtEtagere.Text))
+        {
+            ShowError("L'étagère est obligatoire.");
+            _txtEtagere.Focus();
             return;
         }
 

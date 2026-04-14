@@ -11,17 +11,18 @@ public class DatabaseContext
     {
         return new MySqlConnection(_connectionString);
     }
-    public bool TestConnection()
+
+    public async Task<bool> TestConnectionAsync()
     {
         try
         {
             using var connection = CreateConnection();
-            connection.Open();
+            await connection.OpenAsync();
             return connection.State == ConnectionState.Open;
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Error when connecting to database : {e.Message}");
+            Console.WriteLine($"Error when connecting to database: {e.Message}");
             return false;
         }
     }

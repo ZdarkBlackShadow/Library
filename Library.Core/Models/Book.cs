@@ -7,6 +7,8 @@ public class Book
     public string Author { get; set; } = string.Empty;
     public string? Genre { get; set; }
     public string? ISBN { get; set; }
-    public string Location { get; set; } = string.Empty;
+    public int? PublicationYear { get; set; }
+    public string Rayon { get; set; } = string.Empty;
+    public string Etagere { get; set; } = string.Empty;
     public bool IsAvailable { get; set; } = true;
 }

@@ -9,11 +9,20 @@ public partial class MainForm : Form
 {
     private readonly BookService _bookService = new();
     private readonly LoanService _loanService = new();
+    private readonly int _loggedInUserId;
 
     // ── Sidebar ──
     private Panel _sidebar = null!;
+    private Label _lblSidebarTitle = null!;
     private Button _btnNavBooks = null!;
     private Button _btnNavLoans = null!;
+    private Button _btnToggleSidebar = null!;
+    private bool _sidebarExpanded = true;
+    private const int SidebarExpandedWidth = 220;
+    private const int SidebarCollapsedWidth = 60;
+
+    // ── Root layout ──
+    private TableLayoutPanel _tableLayout = null!;
 
     // ── Content panels ──
     private Panel _contentArea = null!;
@@ -32,16 +41,17 @@ public partial class MainForm : Form
     private DataGridView _gridLoans = null!;
     private Label _lblLoanCount = null!;
 
-    public MainForm()
+    public MainForm(int loggedInUserId)
     {
+        _loggedInUserId = loggedInUserId;
         this.Text = "Rat de Bibliotheque - Inventaire";
-        this.Size = new Size(1100, 680);
-        this.MinimumSize = new Size(900, 550);
+        this.Size = new Size(1200, 680);
+        this.MinimumSize = new Size(950, 550);
         UIHelper.StyleForm(this);
 
         BuildLayout();
         ShowBooksPanel();
-        RefreshBooks();
+        _ = RefreshBooksAsync();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -50,27 +60,58 @@ public partial class MainForm : Form
 
     private void BuildLayout()
     {
-        // Suspend layout during construction to prevent flicker under Wine
         this.SuspendLayout();
-        BuildSidebar();
-        BuildContentArea();
+
+        // ── Root container ────────────────────────────────────────────
+        // Using a TableLayoutPanel instead of DockStyle.Left + DockStyle.Fill
+        // on sibling panels eliminates the Z-order/docking interaction that
+        // Wine's layout pass gets wrong (it processes controls from the highest
+        // Controls-collection index toward 0 without a guaranteed two-pass
+        // grouping of non-Fill before Fill, so whichever panel ends up at the
+        // higher index claims its space first — and when Fill wins that race it
+        // takes the full client width, causing the sidebar to overlap instead of
+        // push the content aside).
+        //
+        // A TableLayoutPanel with an Absolute first column and a Percent(100)
+        // second column is an explicit spatial contract: no iteration order or
+        // Z-order value can override it.
+        _tableLayout = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            RowCount = 1,
+            Margin = new Padding(0),
+            Padding = new Padding(0),
+            CellBorderStyle = TableLayoutPanelCellBorderStyle.None
+        };
+        UIHelper.EnableDoubleBuffered(_tableLayout);
+        _tableLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, SidebarExpandedWidth));
+        _tableLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        _tableLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+        this.Controls.Add(_tableLayout);
+
+        BuildSidebar();      // adds _sidebar to _tableLayout column 0
+        BuildContentArea();  // adds _contentArea to _tableLayout column 1
         BuildBooksPanel();
         BuildLoansPanel();
+
         this.ResumeLayout(true);
     }
 
     // ── Sidebar ────────────────────────────────────────────────────
     private void BuildSidebar()
     {
+        // Dock = Fill so the panel fills its TableLayoutPanel cell completely.
+        // The cell width is controlled by _tableLayout.ColumnStyles[0]; no Width
+        // property is needed or meaningful here.
         _sidebar = new Panel
         {
-            Dock = DockStyle.Left,
-            Width = 220,
+            Dock = DockStyle.Fill,
             BackColor = UIHelper.SidebarBg
         };
 
-        // App title
-        var lblAppTitle = new Label
+        // Stored as a field so OnToggleSidebar can show/hide it
+        _lblSidebarTitle = new Label
         {
             Text = "Rat de\nBibliotheque",
             Dock = DockStyle.Top,
@@ -88,22 +129,35 @@ public partial class MainForm : Form
             BackColor = UIHelper.SidebarHover
         };
 
-        // Navigation buttons
         _btnNavLoans = new Button { Text = "    Emprunts" };
         UIHelper.StyleSidebarButton(_btnNavLoans);
-        _btnNavLoans.Click += (_, _) => ShowLoansPanel();
+        _btnNavLoans.Click += async (_, _) => { ShowLoansPanel(); await RefreshLoansAsync(); };
 
         _btnNavBooks = new Button { Text = "    Livres" };
         UIHelper.StyleSidebarButton(_btnNavBooks, isActive: true);
-        _btnNavBooks.Click += (_, _) => ShowBooksPanel();
+        _btnNavBooks.Click += async (_, _) => { ShowBooksPanel(); await RefreshBooksAsync(); };
 
-        // Order matters: Top-docked items stack from top
-        _sidebar.Controls.Add(_btnNavLoans);
-        _sidebar.Controls.Add(_btnNavBooks);
-        _sidebar.Controls.Add(separator);
-        _sidebar.Controls.Add(lblAppTitle);
+        // Toggle button docks to the bottom of the sidebar.
+        // StyleSidebarButton sets Dock=Top and TextAlign=MiddleLeft, so we
+        // override those two properties right after the style call.
+        _btnToggleSidebar = new Button { Text = " «" };
+        UIHelper.StyleSidebarButton(_btnToggleSidebar);
+        _btnToggleSidebar.Dock = DockStyle.Bottom;
+        _btnToggleSidebar.TextAlign = ContentAlignment.MiddleCenter;
+        _btnToggleSidebar.Padding = new Padding(0);
+        _btnToggleSidebar.Click += OnToggleSidebar;
 
-        this.Controls.Add(_sidebar);
+        // Add order for Top-docked controls: the LAST control added ends up at
+        // the visual TOP (it becomes index 0 = processed first by the layout engine).
+        // Bottom-docked controls are independent; add the toggle first so it anchors
+        // to the very bottom before the Top controls are stacked above it.
+        _sidebar.Controls.Add(_btnToggleSidebar); // DockStyle.Bottom → bottom of sidebar
+        _sidebar.Controls.Add(_btnNavLoans);       // Top → will be below NavBooks
+        _sidebar.Controls.Add(_btnNavBooks);       // Top → will be below separator
+        _sidebar.Controls.Add(separator);          // Top → will be below title
+        _sidebar.Controls.Add(_lblSidebarTitle);   // Top → sits at the very top
+
+        _tableLayout.Controls.Add(_sidebar, 0, 0); // column 0, row 0
     }
 
     // ── Content Area ───────────────────────────────────────────────
@@ -116,7 +170,7 @@ public partial class MainForm : Form
             Padding = new Padding(20)
         };
         UIHelper.EnableDoubleBuffered(_contentArea);
-        this.Controls.Add(_contentArea);
+        _tableLayout.Controls.Add(_contentArea, 1, 0); // column 1, row 0
     }
 
     // ── Books Panel ────────────────────────────────────────────────
@@ -174,7 +228,7 @@ public partial class MainForm : Form
             Width = 180
         };
         UIHelper.StyleTextBox(_txtSearchTitle);
-        _txtSearchTitle.TextChanged += (_, _) => RefreshBooks();
+        _txtSearchTitle.TextChanged += async (_, _) => await RefreshBooksAsync();
 
         _txtSearchAuthor = new TextBox
         {
@@ -183,7 +237,7 @@ public partial class MainForm : Form
             Width = 160
         };
         UIHelper.StyleTextBox(_txtSearchAuthor);
-        _txtSearchAuthor.TextChanged += (_, _) => RefreshBooks();
+        _txtSearchAuthor.TextChanged += async (_, _) => await RefreshBooksAsync();
 
         _txtSearchGenre = new TextBox
         {
@@ -192,7 +246,7 @@ public partial class MainForm : Form
             Width = 130
         };
         UIHelper.StyleTextBox(_txtSearchGenre);
-        _txtSearchGenre.TextChanged += (_, _) => RefreshBooks();
+        _txtSearchGenre.TextChanged += async (_, _) => await RefreshBooksAsync();
 
         _txtSearchIsbn = new TextBox
         {
@@ -201,7 +255,7 @@ public partial class MainForm : Form
             Width = 140
         };
         UIHelper.StyleTextBox(_txtSearchIsbn);
-        _txtSearchIsbn.TextChanged += (_, _) => RefreshBooks();
+        _txtSearchIsbn.TextChanged += async (_, _) => await RefreshBooksAsync();
 
         var btnClear = new Button
         {
@@ -251,7 +305,6 @@ public partial class MainForm : Form
         UIHelper.StyleDataGridView(_gridBooks);
         _gridBooks.CellFormatting += OnBooksCellFormatting;
 
-        // ── Assembly order (reverse for Dock) ──
         _booksPanel.Controls.Add(_gridBooks);
         _booksPanel.Controls.Add(actionBar);
         _booksPanel.Controls.Add(searchCard);
@@ -263,7 +316,6 @@ public partial class MainForm : Form
     {
         _loansPanel = new Panel { Dock = DockStyle.Fill, BackColor = UIHelper.ContentBg };
 
-        // ── Header ──
         var header = new Panel
         {
             Dock = DockStyle.Top,
@@ -289,7 +341,6 @@ public partial class MainForm : Form
 
         header.Controls.AddRange(new Control[] { lblTitle, _lblLoanCount });
 
-        // ── Action bar ──
         var actionBar = new Panel
         {
             Dock = DockStyle.Top,
@@ -304,19 +355,69 @@ public partial class MainForm : Form
 
         var btnRefresh = new Button { Text = "Actualiser", Location = new Point(170, 8), Width = 110 };
         UIHelper.StyleSecondaryButton(btnRefresh);
-        btnRefresh.Click += (_, _) => RefreshLoans();
+        btnRefresh.Click += async (_, _) => await RefreshLoansAsync();
 
         actionBar.Controls.AddRange(new Control[] { btnReturn, btnRefresh });
 
-        // ── DataGridView ──
         _gridLoans = new DataGridView { Dock = DockStyle.Fill };
         UIHelper.StyleDataGridView(_gridLoans);
         _gridLoans.CellFormatting += OnLoansCellFormatting;
 
-        // ── Assembly ──
         _loansPanel.Controls.Add(_gridLoans);
         _loansPanel.Controls.Add(actionBar);
         _loansPanel.Controls.Add(header);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  SIDEBAR TOGGLE
+    // ═══════════════════════════════════════════════════════════════
+
+    private void OnToggleSidebar(object? sender, EventArgs e)
+    {
+        _sidebarExpanded = !_sidebarExpanded;
+
+        // Suspend both the form and the table so the column-style change,
+        // the visibility toggle, and the text updates all flush in one pass.
+        this.SuspendLayout();
+        _tableLayout.SuspendLayout();
+
+        if (_sidebarExpanded)
+        {
+            // Widen the sidebar column — the content column auto-shrinks to fill
+            // whatever remains because its ColumnStyle is Percent(100).
+            _tableLayout.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, SidebarExpandedWidth);
+
+            _lblSidebarTitle.Visible = true;
+
+            _btnNavBooks.Text = "    Livres";
+            _btnNavBooks.TextAlign = ContentAlignment.MiddleLeft;
+            _btnNavBooks.Padding = new Padding(20, 0, 0, 0);
+
+            _btnNavLoans.Text = "    Emprunts";
+            _btnNavLoans.TextAlign = ContentAlignment.MiddleLeft;
+            _btnNavLoans.Padding = new Padding(20, 0, 0, 0);
+
+            _btnToggleSidebar.Text = " «";
+        }
+        else
+        {
+            _tableLayout.ColumnStyles[0] = new ColumnStyle(SizeType.Absolute, SidebarCollapsedWidth);
+
+            _lblSidebarTitle.Visible = false;
+
+            _btnNavBooks.Text = "L";
+            _btnNavBooks.TextAlign = ContentAlignment.MiddleCenter;
+            _btnNavBooks.Padding = new Padding(0);
+
+            _btnNavLoans.Text = "E";
+            _btnNavLoans.TextAlign = ContentAlignment.MiddleCenter;
+            _btnNavLoans.Padding = new Padding(0);
+
+            _btnToggleSidebar.Text = " »";
+        }
+
+        _tableLayout.ResumeLayout(true);
+        this.ResumeLayout(true);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -331,7 +432,9 @@ public partial class MainForm : Form
         _contentArea.ResumeLayout(true);
         UIHelper.StyleSidebarButton(_btnNavBooks, isActive: true);
         UIHelper.StyleSidebarButton(_btnNavLoans, isActive: false);
-        RefreshBooks();
+        // StyleSidebarButton resets TextAlign/Padding to expanded defaults;
+        // restore collapsed state if the sidebar is currently collapsed.
+        if (!_sidebarExpanded) RestoreCollapsedButtonStyle();
     }
 
     private void ShowLoansPanel()
@@ -342,14 +445,24 @@ public partial class MainForm : Form
         _contentArea.ResumeLayout(true);
         UIHelper.StyleSidebarButton(_btnNavBooks, isActive: false);
         UIHelper.StyleSidebarButton(_btnNavLoans, isActive: true);
-        RefreshLoans();
+        if (!_sidebarExpanded) RestoreCollapsedButtonStyle();
+    }
+
+    private void RestoreCollapsedButtonStyle()
+    {
+        _btnNavBooks.Text = "L";
+        _btnNavBooks.TextAlign = ContentAlignment.MiddleCenter;
+        _btnNavBooks.Padding = new Padding(0);
+        _btnNavLoans.Text = "E";
+        _btnNavLoans.TextAlign = ContentAlignment.MiddleCenter;
+        _btnNavLoans.Padding = new Padding(0);
     }
 
     // ═══════════════════════════════════════════════════════════════
     //  BOOKS CRUD
     // ═══════════════════════════════════════════════════════════════
 
-    private void RefreshBooks()
+    private async Task RefreshBooksAsync()
     {
         try
         {
@@ -362,21 +475,27 @@ public partial class MainForm : Form
                              !string.IsNullOrEmpty(genre) || !string.IsNullOrEmpty(isbn);
 
             var books = hasFilter
-                ? _bookService.SearchBooks(title, author, genre, isbn)
-                : _bookService.GetAllBooks();
+                ? await _bookService.SearchBooks(title, author, genre, isbn)
+                : await _bookService.GetAllBooks();
 
             _gridBooks.DataSource = null;
             _gridBooks.DataSource = books;
 
             if (_gridBooks.Columns.Count > 0)
             {
+                // Replace auto-generated CheckBoxColumn with TextBoxColumn so
+                // CellFormatting can safely set e.Value to a string ("Oui"/"Non")
+                EnsureTextColumn(_gridBooks, "IsAvailable");
+
                 SetColumn(_gridBooks, "Id", visible: false);
-                SetColumn(_gridBooks, "Title", "Titre", 30);
-                SetColumn(_gridBooks, "Author", "Auteur", 20);
-                SetColumn(_gridBooks, "Genre", "Genre", 14);
-                SetColumn(_gridBooks, "ISBN", "ISBN", 16);
-                SetColumn(_gridBooks, "Location", "Emplacement", 20);
-                SetColumn(_gridBooks, "IsAvailable", "Dispo.", 8);
+                SetColumn(_gridBooks, "Title", "Titre", 20);
+                SetColumn(_gridBooks, "Author", "Auteur", 16);
+                SetColumn(_gridBooks, "Genre", "Genre", 11);
+                SetColumn(_gridBooks, "ISBN", "ISBN", 13);
+                SetColumn(_gridBooks, "PublicationYear", "Année", 7);
+                SetColumn(_gridBooks, "Rayon", "Rayon", 11);
+                SetColumn(_gridBooks, "Etagere", "Étagère", 11);
+                SetColumn(_gridBooks, "IsAvailable", "Dispo.", 7);
             }
 
             _lblBookCount.Text = $"{books.Count} livre{(books.Count > 1 ? "s" : "")}";
@@ -388,47 +507,48 @@ public partial class MainForm : Form
         }
     }
 
-    private void OnAddBook(object? sender, EventArgs e)
+    private async void OnAddBook(object? sender, EventArgs e)
     {
         using var form = new BookEditForm();
-        if (form.ShowDialog(this) == DialogResult.OK)
+        if (form.ShowDialog(this) != DialogResult.OK) return;
+
+        try
         {
-            try
-            {
-                _bookService.AddBook(form.BookTitle, form.BookAuthor, form.BookGenre, form.BookIsbn, form.BookLocation);
-                RefreshBooks();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Erreur lors de l'ajout : {ex.Message}", "Erreur",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            await _bookService.AddBook(
+                form.BookTitle, form.BookAuthor, form.BookGenre, form.BookIsbn,
+                form.BookPublicationYear, form.BookRayon, form.BookEtagere);
+            await RefreshBooksAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erreur lors de l'ajout : {ex.Message}", "Erreur",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    private void OnEditBook(object? sender, EventArgs e)
+    private async void OnEditBook(object? sender, EventArgs e)
     {
         var book = GetSelectedBook();
         if (book == null) return;
 
         using var form = new BookEditForm(book);
-        if (form.ShowDialog(this) == DialogResult.OK)
+        if (form.ShowDialog(this) != DialogResult.OK) return;
+
+        try
         {
-            try
-            {
-                _bookService.UpdateBook(book.Id, form.BookTitle, form.BookAuthor,
-                    form.BookGenre, form.BookIsbn, form.BookLocation);
-                RefreshBooks();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Erreur lors de la modification : {ex.Message}", "Erreur",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            await _bookService.UpdateBook(
+                book.Id, form.BookTitle, form.BookAuthor, form.BookGenre, form.BookIsbn,
+                form.BookPublicationYear, form.BookRayon, form.BookEtagere);
+            await RefreshBooksAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erreur lors de la modification : {ex.Message}", "Erreur",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    private void OnDeleteBook(object? sender, EventArgs e)
+    private async void OnDeleteBook(object? sender, EventArgs e)
     {
         var book = GetSelectedBook();
         if (book == null) return;
@@ -439,22 +559,21 @@ public partial class MainForm : Form
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning);
 
-        if (result == DialogResult.Yes)
+        if (result != DialogResult.Yes) return;
+
+        try
         {
-            try
-            {
-                _bookService.DeleteBook(book.Id);
-                RefreshBooks();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Erreur lors de la suppression : {ex.Message}", "Erreur",
-                    MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
+            await _bookService.DeleteBook(book.Id);
+            await RefreshBooksAsync();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erreur lors de la suppression : {ex.Message}", "Erreur",
+                MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
-    private void OnBorrowBook(object? sender, EventArgs e)
+    private async void OnBorrowBook(object? sender, EventArgs e)
     {
         var book = GetSelectedBook();
         if (book == null) return;
@@ -466,14 +585,13 @@ public partial class MainForm : Form
             return;
         }
 
-        // For simplicity, use user ID 1 (in a real app, pass the logged-in user ID)
         try
         {
-            if (_loanService.BorrowBook(book.Id, 1))
+            if (await _loanService.BorrowBook(book.Id, _loggedInUserId))
             {
                 MessageBox.Show($"\"{book.Title}\" a ete emprunte pour 14 jours.",
                     "Emprunt enregistre", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                RefreshBooks();
+                await RefreshBooksAsync();
             }
             else
             {
@@ -494,7 +612,7 @@ public partial class MainForm : Form
         _txtSearchAuthor.Clear();
         _txtSearchGenre.Clear();
         _txtSearchIsbn.Clear();
-        RefreshBooks();
+        // TextChanged will fire on each Clear() and trigger RefreshBooksAsync automatically
     }
 
     private Book? GetSelectedBook()
@@ -512,16 +630,20 @@ public partial class MainForm : Form
     //  LOANS
     // ═══════════════════════════════════════════════════════════════
 
-    private void RefreshLoans()
+    private async Task RefreshLoansAsync()
     {
         try
         {
-            var loans = _loanService.GetAllLoans();
+            var loans = await _loanService.GetAllLoans();
             _gridLoans.DataSource = null;
             _gridLoans.DataSource = loans;
 
             if (_gridLoans.Columns.Count > 0)
             {
+                // Same fix: replace CheckBoxColumns before CellFormatting runs
+                EnsureTextColumn(_gridLoans, "IsOverdue");
+                EnsureTextColumn(_gridLoans, "IsActive");
+
                 SetColumn(_gridLoans, "Id", visible: false);
                 SetColumn(_gridLoans, "BookId", visible: false);
                 SetColumn(_gridLoans, "UserId", visible: false);
@@ -544,7 +666,7 @@ public partial class MainForm : Form
         }
     }
 
-    private void OnReturnBook(object? sender, EventArgs e)
+    private async void OnReturnBook(object? sender, EventArgs e)
     {
         if (_gridLoans.CurrentRow == null || _gridLoans.CurrentRow.DataBoundItem is not Loan loan)
         {
@@ -562,11 +684,11 @@ public partial class MainForm : Form
 
         try
         {
-            if (_loanService.ReturnBook(loan.Id))
+            if (await _loanService.ReturnBook(loan.Id))
             {
                 MessageBox.Show($"\"{loan.BookTitle}\" a ete retourne.", "Retour enregistre",
                     MessageBoxButtons.OK, MessageBoxIcon.Information);
-                RefreshLoans();
+                await RefreshLoansAsync();
             }
             else
             {
@@ -638,5 +760,26 @@ public partial class MainForm : Form
         if (header != null) col.HeaderText = header;
         if (fillWeight > 0) col.FillWeight = fillWeight;
         if (format != null) col.DefaultCellStyle.Format = format;
+    }
+
+    /// <summary>
+    /// DataGridView auto-generates a DataGridViewCheckBoxColumn for bool properties.
+    /// A CheckBoxColumn only accepts bool/CheckState as formatted values — setting a
+    /// string in CellFormatting throws System.FormatException (visible on Wine).
+    /// This method replaces the auto-generated column with a plain TextBoxColumn so
+    /// CellFormatting can safely write "Oui"/"Non" strings.
+    /// </summary>
+    private static void EnsureTextColumn(DataGridView grid, string name)
+    {
+        if (grid.Columns[name] is not DataGridViewCheckBoxColumn checkCol) return;
+
+        int index = checkCol.Index;
+        string dataPropertyName = checkCol.DataPropertyName;
+        grid.Columns.RemoveAt(index);
+        grid.Columns.Insert(index, new DataGridViewTextBoxColumn
+        {
+            Name = name,
+            DataPropertyName = dataPropertyName,
+        });
     }
 }
